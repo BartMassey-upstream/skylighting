@@ -9,6 +9,7 @@ module Skylighting.Format.HTML (
 
 import Data.List (intersperse, sort)
 import qualified Data.Map as Map
+import Data.Maybe (isJust)
 import qualified Data.Text as Text
 import Skylighting.Types
 import Text.Blaze.Html
@@ -64,7 +65,7 @@ formatHtmlStyled :: FormatOptions -> Style -> [SourceLine] -> Html
 formatHtmlStyled opts style = formatHtmlMaybeStyled opts (Just style)
 
 formatHtmlMaybeStyled :: FormatOptions -> Maybe Style -> [SourceLine] -> Html
-formatHtmlMaybeStyled opts styled = wrapCode opts
+formatHtmlMaybeStyled opts styled = wrapCode opts (isJust styled)
                                   . mconcat . intersperse (toHtml "\n")
                                   . map (mapM_ (tokenToHtml opts styled))
 
@@ -78,7 +79,7 @@ formatHtmlBlock :: FormatOptions -> [SourceLine] -> Html
 formatHtmlBlock opts ls =
   H.div ! A.class_ (toValue "sourceCode") $
   H.pre ! A.class_ (toValue $ Text.unwords classes)
-        $ wrapCode opts
+        $ wrapCode opts False
         $ mconcat . intersperse (toHtml "\n")
         $ zipWith (sourceLineToHtml opts) [startNum..] ls
   where  classes = Text.pack "sourceCode" :
@@ -87,14 +88,18 @@ formatHtmlBlock opts ls =
                       , x /= Text.pack "sourceCode"]
          startNum = LineNo $ startNumber opts
 
-wrapCode :: FormatOptions -> Html -> Html
-wrapCode opts h = H.code ! A.class_ (toValue $ Text.unwords
+wrapCode :: FormatOptions -> Bool -> Html -> Html
+wrapCode opts ws h = H.code ! A.class_ (toValue $ Text.unwords
                                                      $ Text.pack "sourceCode"
                                                      : codeClasses opts)
-                         !? (startZero /= 0, A.style (toValue counterOverride))
+                         !? (styled, A.style (toValue stylings))
                          $ h
   where  counterOverride = "counter-reset: source-line " <> show startZero <> ";"
+         wsPre = "white-space: pre;"
          startZero = startNumber opts - 1
+         styled = startZero /= 0 || ws
+         stylings = (if startZero /= 0 then counterOverride else "") ++
+                    (if ws then wsPre else "")
 
 -- | Each line of source is wrapped in an (inline-block) anchor that makes
 -- subsequent per-line processing (e.g. adding line numbers) possible.

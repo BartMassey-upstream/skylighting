@@ -262,7 +262,7 @@ hlHtml :: Bool               -- ^ Fragment
       -> IO ()
 hlHtml frag fname opts sty sourceLines =
  if frag
-    then putStrLn $ renderHtml fragment
+    then putStrLn $ renderHtml $ formatHtmlStyled opts sty sourceLines
     else putStrLn $ renderHtml $ do
            H.docType
            H.html $ do
@@ -270,9 +270,8 @@ hlHtml frag fname opts sty sourceLines =
                pageTitle
                metadata
                css
-             H.body $ H.toHtml fragment
-  where fragment = formatHtmlBlock opts sourceLines
-        css = H.style H.! A.type_ "text/css" $ H.toHtml $ styleToCss sty
+             H.body $ H.toHtml $ formatHtmlBlock opts sourceLines
+  where css = H.style H.! A.type_ "text/css" $ H.toHtml $ styleToCss sty
         pageTitle = H.title $ H.toHtml fname
         metadata = do
           H.meta H.! A.charset "utf-8"
