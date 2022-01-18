@@ -3,6 +3,7 @@
 module Skylighting.Format.HTML (
       formatHtmlInline
     , formatHtmlBlock
+    , formatHtmlStyled
     , styleToCss
     ) where
 
@@ -53,9 +54,19 @@ import Data.Semigroup
 -- 'WarningTok'        = @wa@.
 -- A 'NormalTok' is not marked up at all.
 formatHtmlInline :: FormatOptions -> [SourceLine] -> Html
-formatHtmlInline opts = wrapCode opts
-                      . mconcat . intersperse (toHtml "\n")
-                      . map (mapM_ (tokenToHtml opts))
+formatHtmlInline opts = formatHtmlMaybeStyled opts Nothing
+
+-- | Format tokens with the given style pre-applied to get
+-- HTML inline style tags. See the documentation for
+-- 'formatHtmlInline' for information about how tokens are
+-- encoded.
+formatHtmlStyled :: FormatOptions -> Style -> [SourceLine] -> Html
+formatHtmlStyled opts style = formatHtmlMaybeStyled opts (Just style)
+
+formatHtmlMaybeStyled :: FormatOptions -> Maybe Style -> [SourceLine] -> Html
+formatHtmlMaybeStyled opts styled = wrapCode opts
+                                  . mconcat . intersperse (toHtml "\n")
+                                  . map (mapM_ (tokenToHtml opts styled))
 
 -- | Format tokens as an HTML @pre@ block. Each line is wrapped in an a
 -- element with the class ‘source-line’. If line numbering
@@ -78,15 +89,15 @@ formatHtmlBlock opts ls =
 
 wrapCode :: FormatOptions -> Html -> Html
 wrapCode opts h = H.code ! A.class_ (toValue $ Text.unwords
-                                             $ Text.pack "sourceCode"
-                                               : codeClasses opts)
+                                                     $ Text.pack "sourceCode"
+                                                     : codeClasses opts)
                          !? (startZero /= 0, A.style (toValue counterOverride))
                          $ h
   where  counterOverride = "counter-reset: source-line " <> show startZero <> ";"
          startZero = startNumber opts - 1
 
 -- | Each line of source is wrapped in an (inline-block) anchor that makes
--- subsequent per-line processing (e.g. adding line numnbers) possible.
+-- subsequent per-line processing (e.g. adding line numbers) possible.
 sourceLineToHtml :: FormatOptions -> LineNo -> SourceLine -> Html
 sourceLineToHtml opts lno cont =
   H.span ! A.id lineNum
@@ -101,18 +112,28 @@ sourceLineToHtml opts lno cont =
                      else customAttribute (fromString "tabindex")
                            (fromString "-1"))
                $ mempty
-           mapM_ (tokenToHtml opts) cont
+           mapM_ (tokenToHtml opts Nothing) cont
   where  lineNum = toValue prefixedLineNo
          lineRef = toValue ('#':prefixedLineNo)
          prefixedLineNo = Text.unpack (lineIdPrefix opts) <> show (lineNo lno)
 
-tokenToHtml :: FormatOptions -> Token -> Html
-tokenToHtml _ (NormalTok, txt)  = toHtml txt
-tokenToHtml opts (toktype, txt) =
+tokenToHtml :: FormatOptions -> Maybe Style -> Token -> Html
+tokenToHtml _ _ (NormalTok, txt)  = toHtml txt
+tokenToHtml opts Nothing (toktype, txt) =
   if titleAttributes opts
      then sp ! A.title (toValue $ show toktype)
      else sp
-   where sp = H.span ! A.class_ (toValue $ short toktype) $ toHtml txt
+   where
+     sp = H.span ! A.class_ (toValue $ short toktype) $ toHtml txt
+tokenToHtml opts (Just style) (toktype, txt) =
+  if titleAttributes opts
+     then sp ! A.title (toValue $ show toktype)
+     else sp
+   where
+     cl = A.class_ (toValue $ short toktype)
+     sp = H.span ! cl ! st $ toHtml txt
+     st = A.style (toValue $ toCssSpecs tokstyle)
+         where tokstyle = (Map.!) (tokenStyles style) toktype
 
 short :: TokenType -> String
 short KeywordTok        = "kw"
@@ -202,15 +223,17 @@ styleToCss f = unlines $
           ]
 
 toCss :: (TokenType, TokenStyle) -> String
-toCss (t,tf) = "code span" ++ (if null (short t) then "" else ('.' : short t)) ++ " { "
-                ++ colorspec ++ backgroundspec ++ weightspec ++ stylespec
-                ++ decorationspec ++ "} /* " ++ showTokenType t ++ " */"
-  where colorspec = maybe "" (\col -> "color: " ++ fromColor col ++ "; ") $ tokenColor tf
-        backgroundspec = maybe "" (\col -> "background-color: " ++ fromColor col ++ "; ") $ tokenBackground tf
-        weightspec = if tokenBold tf then "font-weight: bold; " else ""
-        stylespec  = if tokenItalic tf then "font-style: italic; " else ""
-        decorationspec = if tokenUnderline tf then "text-decoration: underline; " else ""
-        showTokenType t' = case reverse (show t') of
-                             'k':'o':'T':xs -> reverse xs
-                             _              -> ""
+toCss (t, tf) = "code span" ++ (if null (short t) then "" else ('.' : short t)) ++ " { "
+                ++ toCssSpecs tf ++ "} /* " ++ showTokenType t ++ " */"
+    where
+      showTokenType t' = case reverse (show t') of
+                           'k':'o':'T':xs -> reverse xs
+                           _              -> ""
 
+toCssSpecs :: TokenStyle -> String
+toCssSpecs tf = colorspec ++ backgroundspec ++ weightspec ++ stylespec ++ decorationspec
+    where colorspec = maybe "" (\col -> "color: " ++ fromColor col ++ "; ") $ tokenColor tf
+          backgroundspec = maybe "" (\col -> "background-color: " ++ fromColor col ++ "; ") $ tokenBackground tf
+          weightspec = if tokenBold tf then "font-weight: bold; " else ""
+          stylespec  = if tokenItalic tf then "font-style: italic; " else ""
+          decorationspec = if tokenUnderline tf then "text-decoration: underline; " else ""
